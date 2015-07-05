@@ -1,8 +1,9 @@
 "use strict";
 var parseColor=require('./color');
+var cvsState={};
 var cvsMethods = {
     beginPath(ctx){
-        return `CGContextBeginPath(${ctx})`;
+        return `CGContextBeginPath(${ctx})`
     },
     closePath(ctx){
         return `CGContextClosePath(${ctx})`
@@ -11,16 +12,16 @@ var cvsMethods = {
         return `CGContextClearRect(${ctx},${printCGRectMake(args)})`
     },
     fillRect(ctx, args){
-        return `CGContextFillRect(${ctx},${printCGRectMake(args)})`
+        return applyState(ctx,`CGContextFillRect(${ctx},${printCGRectMake(args)})`)
     },
     strokeRect(ctx, args){
-        return `CGContextStrokeRect(${ctx},${printCGRectMake(args)})`
+        return applyState(ctx,`CGContextStrokeRect(${ctx},${printCGRectMake(args)})`)
     },
     moveTo(ctx, args){
         return `CGContextMoveToPoint(${ctx},${mapNumbers(args).join(',')})`
     },
     lineTo(ctx, args){
-        return `CGContextLineToPoint(${ctx},${mapNumbers(args).join(',')})`
+        return `CGContextAddLineToPoint(${ctx},${mapNumbers(args).join(',')})`
     },
     bezierCurveTo(ctx, args){
         return `CGContextAddCurveToPoint(${ctx},${mapNumbers(args).join(',')})`
@@ -45,10 +46,10 @@ var cvsMethods = {
         return `CGContextAddRect(${ctx},${printCGRectMake(args)})`
     },
     fill(ctx){
-        return `CGContextFillPath(${ctx})`
+        return applyState(ctx,`CGContextFillPath(${ctx})`)
     },
     stroke(ctx){
-        return `CGContextStrokePath(${ctx})`
+        return applyState(ctx,`CGContextStrokePath(${ctx})`)
     },
     clip(ctx){
         return `CGContextClip(${ctx})`
@@ -67,8 +68,7 @@ var cvsMethods = {
         return `CGContextConcatCTM(${ctx},${printCGAffineTransformMake(args)})`
     },
     setTransform(ctx, args){
-        var values = mapPreciseNumbers(args).join(',');
-        return `${defFuncs.setAffineMatrixValues.name}(CGContextGetCTM(${ctx}),${values})`
+        return `[StaticDrawer setContext:${ctx} transform:(CGFloat[]){${mapPreciseNumbers(args).join(',')}}]`;
     },
     save(ctx){
         return `CGContextSaveGState(${ctx})`
@@ -83,17 +83,21 @@ var cvsMethods = {
     globalCompositeOperation(ctx){
 
     },
-    shadowBlur(ctx){
-
+    shadowBlur(ctx,args){
+        cvsState.shadowBlur=mapNumbers(args)[0];
+        cvsState.changed=1;
     },
-    shadowColor(ctx){
-
+    shadowColor(ctx,args){
+        cvsState.shadowColor=parseColor(args[0]);
+        cvsState.changed=1;
     },
-    shadowOffsetX(ctx){
-
+    shadowOffsetX(ctx,args){
+        cvsState.shadowOffsetX=mapNumbers(args[0]);
+        cvsState.changed=1;
     },
-    shadowOffsetY(ctx){
-
+    shadowOffsetY(ctx,args){
+        cvsState.shadowOffsetY=mapNumbers(args[0]);
+        cvsState.changed=1;
     },
     fillStyle(ctx,args){
         var color=parseColor(args[0]);
@@ -104,28 +108,63 @@ var cvsMethods = {
         return `CGContextSetRGBStrokeColor(${ctx},${mapArgNumbers(color.components)})`;
     }
 };
-var defFuncs = {
-    setAffineMatrixValues: {
-        name: 'setAffineMatrixValues',
-        type: 'void',
-        params: {
-            mat: 'CGAffineTransform',
-            a: 'CGFloat', b: 'CGFloat', c: 'CGFloat', d: 'CGFloat',
-            tx: 'CGFloat', ty: 'CGFloat'
-        },
-        body: `mat.a=a;mat.b=b;mat.c=c;mat.d=d;mat.tx=tx;mat.ty=ty;`
+var cvsParams = {
+    clearRect(args){
+        return args;
+    },
+    fillRect(args){
+        return args;
+    },
+    strokeRect(args){
+        return args;
+    },
+    moveTo(args){
+        return args;
+    },
+    lineTo(args){
+        return args;
+    },
+    bezierCurveTo(args){
+        return args;
+    },
+    quadraticCurveTo(ctx, args){
+        return args;
+    },
+    arcTo(args){
+        return args;
+    },
+    arc(args){
+        return args.slice(0,2);
+    },
+    ellipse(args){
+       return args;
+    },
+    rect(args){
+        return args;
+    },
+    translate(args){
+        return args;
+    },
+    transform(args){
+        return [args[4],args[5]]
+    },
+    setTransform(args){
+        return [args[4],args[5]]
     }
 };
-function defineFunc(def, name) {
-    var params = [];
-    objForEach(def.params, function (type, name) {
-        params.push(type + ' ' + name)
-    });
-    return `${def.type} ${name} (${params.join(',')}){${def.body}}`
+function printSetShadowWithColor(ctx){
+  return `CGContextSetShadowWithColor(${ctx},${printCGSizeMake([cvsState.shadowOffsetX,cvsState.shadowOffsetY])},${mapNumbers(cvsState.shadowBlur)},
+  [StaticDrawer createRGBColor:(CGFloat[]){${mapArgNumbers(cvsState.shadowColor.components)}}])`
 }
-function printSetMatrix() {
 
+function applyState(ctx,statement){
+    if(cvsState.changed){
+        cvsState.changed=0;
+        return [printSetShadowWithColor(ctx),statement];
+    }
+    return statement;
 }
+
 /*
  |a  b  0|
  |c  d  0|
@@ -134,12 +173,14 @@ function printSetMatrix() {
 function printCGAffineTransformMake(args) {
     return 'CGAffineTransformMake(' + mapPreciseNumbers(args).join(',') + ')'
 }
+function printCGSizeMake(args){
+    return 'CGSizeMake('+mapArgNumbers(args)+')'
+}
 function printCGRectMake(args) {
-    args = mapNumbers(args).join(',');
-    return 'CGRectMake(' + args + ')'
+    return 'CGRectMake(' + mapArgNumbers(args) + ')'
 }
 function printCGPointMake(args) {
-    return 'CGPointMake(' + mapNumbers(args).join(',') + ')'
+    return 'CGPointMake(' + mapArgNumbers(args) + ')'
 }
 function mapArgNumbers(nums){
     return mapNumbers(nums).join(',')
@@ -174,5 +215,30 @@ module.exports={
     },
     argumentTypeInfo(methodName,index){
         return 'CGFloat'
+    },
+    shouldNormalizeNodes(methodName,args){
+        var func=cvsParams[methodName],nodes,max=-Infinity;
+        if(func){
+            nodes=func(args);
+            nodes.forEach(function (node) {
+                if(!isNaN(node.value) && node.value>max)
+                    max=node.value
+            });
+            return { nodes,max }
+        }
+    },
+    reset(){
+        resetCvsState();
     }
 };
+module.exports.reset();
+function resetCvsState(){
+    cvsState={
+        shadowOffsetX:0,
+        shadowOffsetY:0,
+        shadowBlur:0,
+        shadowColor:parseColor([0,0,0],0),
+        changed:0
+    }
+}
+function retFirstParam(args){return args}

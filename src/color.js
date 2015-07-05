@@ -13,9 +13,9 @@ function Color(rgb,a){
     }
 }
 Color.parse=parseColor;
-function parseColor(color){
+function parseColor(color,a){
     var match;
-    if(color instanceof Color)return color;
+    if(color instanceof Array)return new Color(color,a);
     else if(typeof  color==="string"){
         if(match=color.match(/rgb\((\d+(\.\d+)?),(\d+(\.\d+)?),(\d+(\.\d+)?)\)/i)){
             return new Color([match[1],match[3],match[5]])
