@@ -236,15 +236,16 @@ function objForEach(obj, callback, thisObj) {
     }
 }
 module.exports={
-    rewriteContextCall(methodName,ctxName,args){
-        var func=cvsMethods[methodName];
-        if(!func) throw Error('method:'+methodName+' not support');
-        return func(ctxName,args);
-    },
-    rewritePathCall(methodName,pathName,args){
-        var func=pathMethods[methodName];
-        if(!func) throw Error('method:'+methodName+' not support');
-        return func(pathName,args);
+    rewrite(statements){
+        var ret=[];
+        statements.forEach(function(state){
+           var func=cvsMethods[state.funcName],res;
+            if(!func) throw Error('method:'+state.funcName+' not support');
+            res=func(state.contextName,state.args);
+            if(typeof res=="string") ret.push(res);
+            else if(res.length)ret.push.apply(ret,res)
+        });
+       return ret;
     },
     argumentTypeInfo(methodName,index){
         return 'CGFloat'

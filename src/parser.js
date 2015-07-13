@@ -5,7 +5,13 @@
 var UglifyJS=require('uglify-js');
 var util=require('./util.js');
 var converter=require('./map2oc.js');
+var pathConv=require('./path2oc.js');
 var funcCounter=0;
+var constNames={
+    Math:{
+        PI:'M_PI'
+    }
+};
 util.objForEach(UglifyJS,function(val,key){
     if(key.indexOf('AST_')==0)
       global[key]=val
@@ -15,11 +21,11 @@ module.exports={
     parse
 };
 function parse(source,options){
-    options=util.defaults(options,{output:[],beautify:1,normalize:false});
+    options=util.defaults(options,{output:[],beautify:1,normalize:false,createPath:false});
     var ast=UglifyJS.parse(source+'',{toplevel:false}),output=options.output;
     walkAst(ast, function (node) {
         if(isContextDefFunc(node)){
-            if(!isNaN(options.normalize))
+            if(typeof options.normalize=="number")
                 node=normalizeParam(node,+options.normalize);
             output.push(rewrite2oc(node,options));
             return 1;
@@ -51,9 +57,10 @@ function normalizeParam(defNode,normalize){
     })
 }
 function rewrite2oc(ast,options){
-    var funcName=ast.name.name||'ctx_call_'+base54(funcCounter++),body=[],bodyStr,args,argsType=[],argsTypeMap={};
+    var funcName=ast.name.name||'ctx_call_'+base54(funcCounter++),bodyStatements=[],body,bodyStr,args,retType=options.createPath?'CGPathRef':'void',
+      argsType=[],argsTypeMap={},rewrite=options.createPath?pathConv.rewrite:converter.rewrite;
     walkAst(ast, function (node) {
-        var funcName,contextName,nodeExp,res;
+        var funcName,contextName,nodeExp;
         if(isCallContext(node)){
             funcName= (nodeExp=node.expression) instanceof AST_Sub?  node.property.value:nodeExp.property;
             contextName=nodeExp.expression.name;
@@ -66,27 +73,48 @@ function rewrite2oc(ast,options){
         }
         if(funcName){
             argsTypeMap[contextName]='CGContextRef';
-            if(res=converter.rewriteContextCall(funcName,contextName,args.map(mapArgValue)))
-                res instanceof Array? body.push.apply(body,res):body.push(res);
+            bodyStatements.push({contextName,args:args.map(mapArgValue),funcName});
         }
     });
+    body=rewrite(bodyStatements);
     bodyStr=options.beautify? '\n\t'+body.join(';\n\t')+';'+'\n': body.join(';')+';';
     util.objForEach(argsTypeMap, function (type, name) {
         argsType.push(type+' '+name);
     });
-    return `void ${funcName}(${argsType.join(',')}){${bodyStr}}`;
+
+    return `${retType} ${funcName}(${argsType.join(',')}){${bodyStr}}`;
     function mapArgValue(arg,index){
+        var expName,proName,ret;
         if(arg instanceof AST_Constant)
             return arg.value;
         else if(arg instanceof AST_SymbolRef){
             argsTypeMap[arg.name]=converter.argumentTypeInfo(funcName,index);
             return arg.name
         }
+        else if(arg instanceof AST_Dot && arg.expression instanceof AST_SymbolRef){
+            if(constNames[expName=arg.expression.name] && (ret=constNames[expName][proName=arg.property]) && ret!==undefined)
+                return ret;
+            throw Error(`not support: ${expName}.${proName}`)
+        }
+        else if(arg instanceof AST_Binary){
+            return tryEval(mapArgValue(arg.left,index),mapArgValue(arg.right),arg.operator)
+        }
         else if(arg instanceof AST_UnaryPrefix && arg.expression instanceof AST_Constant && arg.operator ==='-'){
             return - arg.expression.value
         }
         else throw Error('not support');
     }
+
+}
+function tryEval(left,right,operator){
+    if(typeof left==="number" &&typeof  right==="number")
+      switch (operator){
+          case '+':return left+right;
+          case '-':return left-right;
+          case'*':return left*right;
+          case"/":return left/right;
+      }
+    return left+operator+right;
 }
 function isPropertySet(node){
     return node instanceof AST_Binary && node.operator=='=' && node.left instanceof AST_PropAccess
