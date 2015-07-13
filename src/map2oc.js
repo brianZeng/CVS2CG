@@ -34,7 +34,7 @@ var cvsMethods = {
     },
     arc(ctx, args){
         var nargs = mapNumbers(args.slice(0, 2)).concat(mapPreciseNumbers(args.slice(3, 4)));
-        nargs.push(getNumberOrRef(args[5],0));
+        nargs.push(args[5]?1:0);
         return `CGContextAddArc(${ctx},${nargs.join(',')})`
     },
     ellipse(ctx, args){
@@ -108,6 +108,34 @@ var cvsMethods = {
         return `CGContextSetRGBStrokeColor(${ctx},${mapArgNumbers(color.components)})`;
     }
 };
+var pathMethods={
+    moveTo(ctx,args){
+        return `CGPathAddLineToPoint(${ctx},nil,${mapNumbers(args).join(',')})`
+    },
+    arc(ctx, args){
+        var nargs = mapNumbers(args.slice(0, 2)).concat(mapPreciseNumbers(args.slice(3, 4)));
+        nargs.push(args[5]?1:0);
+        return `CGPathAddArc(${ctx},nil,${nargs.join(',')})`
+    },
+    arcTo(ctx, args){
+        return `CGPathAddArcToPoint(${ctx},nil,${mapNumbers(args).join(',')})`
+    },
+    quadraticCurveTo(ctx, args){
+        return `CGPathAddQuadCurveToPoint(${ctx},nil,${mapNumbers(args).join(',')})`
+    },
+    bezierCurveTo(ctx, args){
+        return `CGPathAddCurveToPoint(${ctx},nil,${mapNumbers(args).join(',')})`
+    },
+    moveTo(ctx, args){
+        return `CGPathMoveToPoint(${ctx},nil,${mapNumbers(args).join(',')})`
+    },
+    lineTo(ctx, args){
+        return `CGPathAddLineToPoint(${ctx},nil,${mapNumbers(args).join(',')})`
+    },
+    rect(ctx, args){
+        return `CGPathAddRect(${ctx},${printCGRectMake(args)})`
+    }
+    };
 var cvsParams = {
     clearRect(args){
         return args;
@@ -212,6 +240,11 @@ module.exports={
         var func=cvsMethods[methodName];
         if(!func) throw Error('method:'+methodName+' not support');
         return func(ctxName,args);
+    },
+    rewritePathCall(methodName,pathName,args){
+        var func=pathMethods[methodName];
+        if(!func) throw Error('method:'+methodName+' not support');
+        return func(pathName,args);
     },
     argumentTypeInfo(methodName,index){
         return 'CGFloat'
