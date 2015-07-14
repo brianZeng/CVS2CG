@@ -6,12 +6,20 @@ var config={
     test:{
       files:['temp/index.js','src/*.js'],
       tasks:['browserify:test']
+    },
+    bundle:{
+        files:['src/*.js'],
+        tasks:['browserify:bundle']
     }
   },
   browserify:{
     test:{
       src:'temp/index.js',
       dest:'temp/test.js'
+    },
+      bundle:{
+      src:'index.js',
+      dest:'temp/bundle.js'
     }
   }
 };

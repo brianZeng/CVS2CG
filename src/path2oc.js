@@ -1,6 +1,7 @@
 /**
  * Created by Administrator on 2015/7/13.
  */
+"use strict";
 var util=require('./util.js');
 function VM(options){
   options=util.defaults(options,{
@@ -50,18 +51,14 @@ var pathMethods={
     return `//pop transform ${restoreTransformIdentifier()} use ${currentTransformIdentifier()}`
   },
   beginPath(){
-    var ret=[`${vm.currentPath}=CGPathCreateMutable()`,`CGPathAddPath(${vm.retPath},nil,${vm.currentPath})`];
+    var ret=[`${vm.currentPath}=CGPathCreateMutable()`];
+    if(vm.hasSubPath)
+      ret.unshift.apply(ret,addAddReleaseSubpath());
     vm.hasSubPath=true;
     return ret;
   },
   closePath(){
-    return `CGPathCloseSubPath(${vm.hasSubPath?vm.currentPath:vm.retPath})`
-  },
-  fill(){
-   /* var ret=vm.hasSubPath? [`CGPathAddPath(${vm.retPath},nil,${vm.currentPath})`,`${vm.currentPath}=CGPathCreateMutable()`]:[];
-    vm.hasSubPath=false;
-    return ret;*/
-    return []
+    return `CGPathCloseSubpath(${vm.hasSubPath?vm.currentPath:vm.retPath})`
   },
   setTransform(args){
     vm.transformChanged=1;
@@ -111,10 +108,13 @@ function simpleWap(methodName,args){
 function mapCtxCall(methodName,ctx,args){
   return pathMethods[methodName](ctx,args);
 }
-module .exports={
+function addAddReleaseSubpath(){
+ return [`CGPathAddPath(${vm.retPath},nil,${vm.currentPath})`,`CGPathRelease(${vm.currentPath})`];
+}
+module.exports={
   rewrite(bodies){
     resetVm();
-    var ret=[`CGPathRef ${vm.retPath}=CGPathCreateMutable(),${vm.currentPath}`];
+    var ret=[`CGMutablePathRef ${vm.retPath}=CGPathCreateMutable()`];
     bodies.forEach(function(body){
       var func=pathMethods[body.funcName],retbodies;
       if(func){
@@ -126,7 +126,12 @@ module .exports={
       }
       else throw Error('not support '+body.funcName);
     });
-    if(vm.transformChanged) ret.splice(1,0,`CGAffineTransform ${vm.currentTransform}=CGAffineTransformIdentity`);
+    if(vm.transformChanged)
+      ret.splice(1,0,`CGAffineTransform ${vm.transformIds[0]}=CGAffineTransformIdentity`);
+    if(vm.hasSubPath) {
+      ret[0]+=`,${vm.currentPath}`;
+      ret.push.apply(ret,addAddReleaseSubpath());
+    }
     ret.push(`return ${vm.retPath}`);
     return ret;
   },

@@ -5,9 +5,13 @@
 var UglifyJS=require('uglify-js');
 var util=require('./util.js');
 var converter=require('./map2oc.js');
+var normalizer=require('./normalizer.js');
 var pathConv=require('./path2oc.js');
 var funcCounter=0;
-var constNames={
+const METHOD_TYPE={
+    OC_STATIC:0,OC_INSTANCE:1,C_STYLE:2
+};
+const constNames={
     Math:{
         PI:'M_PI'
     }
@@ -18,26 +22,31 @@ util.objForEach(UglifyJS,function(val,key){
 });
 global.UglifyJS=UglifyJS;
 module.exports={
-    parse
+    parse,METHOD_TYPE
 };
 function parse(source,options){
-    options=util.defaults(options,{output:[],beautify:1,normalize:false,createPath:false});
-    var ast=UglifyJS.parse(source+'',{toplevel:false}),output=options.output;
+    options=util.defaults(options,{
+        output:[],beautify:1,normalize:false,createPath:false,
+        methodType:METHOD_TYPE.C_STYLE
+    });
+    var ast=UglifyJS.parse(source+'',{toplevel:false}),output=options.output,result;
     walkAst(ast, function (node) {
         if(isContextDefFunc(node)){
             if(typeof options.normalize=="number")
                 node=normalizeParam(node,+options.normalize);
-            output.push(rewrite2oc(node,options));
+            result=rewrite2oc(node,options);
+            output.push(`${getFuncSignature(options,result.funcName,result.argTypes)}{${result.bodyStr}}`);
             return 1;
         }
     });
     return output.join('\n');
 }
 function normalizeParam(defNode,normalize){
-   var nodesToRewrite=[],temp,max=-Infinity,ratio,methodName;
+   var nodesToRewrite=[],temp,max=-Infinity,ratio,methodName,ratioNode;
     defNode.body.forEach(function(ast){
        walkAst(ast, function (subNode) {
-           if(subNode instanceof AST_Call && (methodName=getCallMethodName(subNode))&& (temp=converter.shouldNormalizeNodes(methodName,subNode.args))){
+           if(subNode instanceof AST_Call && (methodName=getCallMethodName(subNode))){
+               temp=normalizer.normalize(methodName,subNode.args);
                nodesToRewrite.push.apply(nodesToRewrite,temp.nodes);
                if(!isNaN(temp.max)&& temp.max>max)
                    max=temp.max;
@@ -46,19 +55,19 @@ function normalizeParam(defNode,normalize){
        });
     });
     if(max==-Infinity) return defNode;
-    ratio=normalize/max;
+    ratioNode=new AST_Number({value:ratio=normalize/max});
     return transformAst(defNode,function(subNode){
         if((nodesToRewrite.indexOf(subNode)>-1)){
             if(subNode instanceof AST_Constant)
                 subNode.value*=ratio;
-            else //TODO:if param is not a constant return itself
-                return  subNode;
+            else
+                return  new AST_Binary({left:subNode,right:ratioNode.clone(),operator:'*'});
         }
     })
 }
 function rewrite2oc(ast,options){
-    var funcName=ast.name.name||'ctx_call_'+base54(funcCounter++),bodyStatements=[],body,bodyStr,args,retType=options.createPath?'CGPathRef':'void',
-      argsType=[],argsTypeMap={},rewrite=options.createPath?pathConv.rewrite:converter.rewrite;
+    var funcName=ast.name.name||'ctx_call_'+base54(funcCounter++),bodyStatements=[],body,bodyStr,args,isRetPath=options.createPath,
+      argTypes=[],argsTypeMap={},rewrite=isRetPath?pathConv.rewrite:converter.rewrite;
     walkAst(ast, function (node) {
         var funcName,contextName,nodeExp;
         if(isCallContext(node)){
@@ -72,17 +81,14 @@ function rewrite2oc(ast,options){
             args=[node.right];
         }
         if(funcName){
-            argsTypeMap[contextName]='CGContextRef';
+            !isRetPath&&(argsTypeMap[contextName]='CGContextRef');
             bodyStatements.push({contextName,args:args.map(mapArgValue),funcName});
         }
     });
     body=rewrite(bodyStatements);
     bodyStr=options.beautify? '\n\t'+body.join(';\n\t')+';'+'\n': body.join(';')+';';
-    util.objForEach(argsTypeMap, function (type, name) {
-        argsType.push(type+' '+name);
-    });
-
-    return `${retType} ${funcName}(${argsType.join(',')}){${bodyStr}}`;
+    util.objForEach(argsTypeMap, function (type, name) {argTypes.push({type,name})});
+    return {funcName,argTypes,bodyStr};
     function mapArgValue(arg,index){
         var expName,proName,ret;
         if(arg instanceof AST_Constant)
@@ -105,6 +111,28 @@ function rewrite2oc(ast,options){
         else throw Error('not support');
     }
 
+}
+function getFuncSignature(options,funcName,args){
+    var type=options.createPath? 'CGMutablePathRef':'void';
+    switch (options.methodType){
+        case METHOD_TYPE.C_STYLE: return cSign();
+        case METHOD_TYPE.OC_INSTANCE:return ocSign('-('+type+')');
+        case METHOD_TYPE.OC_STATIC:return ocSign('+('+type+')');
+    }
+    function cSign(){
+        var argSign=args.map(function (arg) {
+            return arg.type+' '+arg.name
+        }).join(',');
+        return `${type} ${funcName}(${argSign})`
+    }
+    function ocSign(type){
+        if(args.length==0)return `${type} ${funcName}`;
+        args[0].sigName=funcName;
+        var argSign=args.map(function (arg) {
+            return (arg.sigName||arg.name)+':('+arg.type+')'+arg.name
+        }).join(' ');
+        return type+' '+argSign
+    }
 }
 function tryEval(left,right,operator){
     if(typeof left==="number" &&typeof  right==="number")
