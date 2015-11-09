@@ -5,11 +5,13 @@
 var UglifyJS=require('uglify-js');
 var util=require('./util.js');
 var converter=require('./map2oc.js');
-var normalizer=require('./normalizer.js');
+var transformer=require('./transformer/index.js');
 var pathConv=require('./path2oc.js');
+var {print}=require('./printer');
+var {transformAst,walkAst,getCallMethodName,isContextDefFunc,isCallContext,isPropertySet}=require('./astUtil.js');
 var funcCounter=0;
 const METHOD_TYPE={
-    OC_STATIC:0,OC_INSTANCE:1,C_STYLE:2
+    OC_STATIC:0,OC_INSTANCE:1,C_STYLE:2,JS_STYLE:3
 };
 const constNames={
     Math:{
@@ -20,50 +22,38 @@ util.objForEach(UglifyJS,function(val,key){
     if(key.indexOf('AST_')==0)
       global[key]=val
 });
-global.UglifyJS=UglifyJS;
 module.exports={
     parse,METHOD_TYPE
 };
 function parse(source,options){
     options=util.defaults(options,{
-        output:[],beautify:1,normalize:false,createPath:false,
-        methodType:METHOD_TYPE.C_STYLE
+        output:[],
+        transform:false,
+        createPath:false,
+        methodType:METHOD_TYPE.C_STYLE,
+        printOptions:{
+            beautify:true
+        }
     });
-    var ast=UglifyJS.parse(source+'',{toplevel:false}),output=options.output,result;
-    walkAst(ast, function (node) {
+    var ast=UglifyJS.parse(source+'',{toplevel:false}),
+        output=options.output,result;
+    var {transformedAst,meta}=transformer.transform(ast,options);
+    var printNodes=[...meta.transformedNodes,...meta.pluginNodes].map(node=>print(node,options));
+
+    /*walkAst(ast, function (node) {
         if(isContextDefFunc(node)){
-            if(typeof options.normalize=="number")
-                node=normalizeParam(node,+options.normalize);
-            result=rewrite2oc(node,options);
-            output.push(`${getFuncSignature(options,result.funcName,result.argTypes)}{${result.bodyStr}}`);
-            return 1;
+            node=transformer.transform(node,options.transform);
+            if(options.methodType==METHOD_TYPE.JS_STYLE){
+                output.push(printer.print(node,options))
+            }
+            else{
+                result=rewrite2oc(node,options);
+                output.push(`${getFuncSignature(options,result.funcName,result.argTypes)}{${result.bodyStr}}`);
+            }
+           return 1;
         }
-    });
-    return output.join('\n');
-}
-function normalizeParam(defNode,normalize){
-   var nodesToRewrite=[],temp,max=-Infinity,ratio,methodName,ratioNode;
-    defNode.body.forEach(function(ast){
-       walkAst(ast, function (subNode) {
-           if(subNode instanceof AST_Call && (methodName=getCallMethodName(subNode))){
-               temp=normalizer.normalize(methodName,subNode.args);
-               nodesToRewrite.push.apply(nodesToRewrite,temp.nodes);
-               if(!isNaN(temp.max)&& temp.max>max)
-                   max=temp.max;
-               return 1;
-           }
-       });
-    });
-    if(max==-Infinity) return defNode;
-    ratioNode=new AST_Number({value:ratio=normalize/max});
-    return transformAst(defNode,function(subNode){
-        if((nodesToRewrite.indexOf(subNode)>-1)){
-            if(subNode instanceof AST_Constant)
-                subNode.value*=ratio;
-            else
-                return  new AST_Binary({left:subNode,right:ratioNode.clone(),operator:'*'});
-        }
-    })
+    });*/
+    return printNodes.join('\n');
 }
 function rewrite2oc(ast,options){
     var funcName=ast.name.name||'ctx_call_'+base54(funcCounter++),bodyStatements=[],body,bodyStr,args,isRetPath=options.createPath,
@@ -110,7 +100,6 @@ function rewrite2oc(ast,options){
         }
         else throw Error('not support');
     }
-
 }
 function getFuncSignature(options,funcName,args){
     var type=options.createPath? 'CGMutablePathRef':'void';
@@ -143,30 +132,4 @@ function tryEval(left,right,operator){
           case"/":return left/right;
       }
     return left+operator+right;
-}
-function isPropertySet(node){
-    return node instanceof AST_Binary && node.operator=='=' && node.left instanceof AST_PropAccess
-}
-function isCallContext(node,nodeExp){
-    nodeExp=nodeExp||node.expression;
-    return node instanceof  AST_Call && nodeExp instanceof AST_PropAccess && nodeExp.expression instanceof AST_SymbolRef
-}
-function isContextDefFunc(node){
-    return node instanceof AST_Defun
-}
-function getCallMethodName(node){
-    if(node instanceof AST_Call){
-        var  exp=node.expression;
-        if(exp instanceof AST_Dot) return exp.property;
-        else if(exp.property instanceof AST_Constant)return exp.property.value;
-    }
-}
-function walkAst(ast,func){
-    var walker=new UglifyJS.TreeWalker(func);
-    ast.walk(walker);
-    return walker
-}
-function transformAst(ast,preFunc,postFunc){
-    var trans=new UglifyJS.TreeTransformer(preFunc,postFunc);
-    return ast.transform(trans);
 }

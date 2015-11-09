@@ -2,14 +2,24 @@
  * Created by Administrator on 2015/7/13.
  */
 var config={
+  babel:{
+    src:{
+      files:[
+        {expand:true,src:['src/**/*.js','index.js'],dest:'src-es5/'}
+      ],
+      options:{
+        blacklist:['es5','es3']
+      }
+    }
+  },
   watch:{
     test:{
       files:['temp/index.js','src/*.js'],
       tasks:['browserify:test']
     },
-    bundle:{
-        files:['src/*.js'],
-        tasks:['browserify:bundle']
+    src:{
+        files:['src/**/*.js'],
+        tasks:['dev-browser']
     }
   },
   browserify:{
@@ -17,15 +27,23 @@ var config={
       src:'temp/index.js',
       dest:'temp/test.js'
     },
-      bundle:{
-      src:'index.js',
-      dest:'temp/bundle.js'
+    src:{
+      src:'src-es5/index.js',
+      dest:'bin/bundle.js',
+        options:{
+          alias:{
+            'uglify-js':'./browser/uglify-js.js',
+            'gl-matrix':'./browser/gl-matrix.js'
+          }
+        }
     }
   }
 };
 
 module .exports=function(grunt){
+  grunt.loadNpmTasks('grunt-babel');
   grunt.loadNpmTasks('grunt-browserify');
   grunt.loadNpmTasks('grunt-contrib-watch');
+  grunt.registerTask('dev-browser',['babel:src','browserify:src']);
   grunt.initConfig(config);
 };

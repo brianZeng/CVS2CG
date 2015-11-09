@@ -76,6 +76,7 @@ var pathMethods={
   rotate(args){
     return useTransform('CGAffineTransformRotate',util.mapPreciseNumbers(args[0]));
   },
+  fill(){return []},
   stroke(){
     return pathMethods.fill();
   }
